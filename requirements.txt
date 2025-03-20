@@ -4,5 +4,8 @@ python-dotenv
 httpx
 groq
 sqlalchemy
+psycopg2
 psycopg2-binary
 asyncpg
+pinecone-client
+sentence-transformers

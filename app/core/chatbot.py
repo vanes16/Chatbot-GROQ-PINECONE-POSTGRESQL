@@ -1,24 +1,26 @@
-from app.core.groq_integration import GroqIntegration
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.core.embedding import PineconeIntegration
+from app.models.db_models import ChatbotData
 
-async def get_chatbot_response(user_input: str):
-    """
-    Mendapatkan respons dari chatbot menggunakan GROQ API.
+pinecone_client = PineconeIntegration()
+
+async def get_chatbot_response(user_input: str, db: AsyncSession):
+    # Cari jawaban di Pinecone
+    pinecone_results = pinecone_client.query_embedding(user_input, top_k=1)
+    if pinecone_results.matches:
+        return pinecone_results.matches[0].metadata["answer"]  # Kembalikan jawaban dari Pinecone
     
-    :param user_input: Input dari pengguna.
-    :return: Respons dari chatbot.
-    """
-    try:
-        # Inisialisasi Groq client
-        groq_client = GroqIntegration()
-        
-        # Pilih model yang akan digunakan (misalnya, 'llama2-70b')
-        model = "llama3-70b-8192"
-        
-        # Kirim input pengguna ke GROQ API
-        response = groq_client.query_groq(model=model, prompt=user_input)
-        
-        # Kembalikan respons
-        return response
-    except Exception as e:
-        print(f"Error in get_chatbot_response: {e}")
-        return "Maaf, terjadi kesalahan saat memproses permintaan Anda."
+    # Jika tidak ditemukan di Pinecone, cari di database PostgreSQL
+    result = await db.execute(select(ChatbotData.answer).where(ChatbotData.question == user_input))
+    qa_pair = result.scalar()
+    
+    if qa_pair:
+        # Simpan ke Pinecone untuk pencarian di masa depan
+        pinecone_client.upsert_embedding(str(qa_pair.id), user_input, qa_pair.answer)
+        return qa_pair  # Kembalikan jawaban dari database
+    
+    # Jika tidak ditemukan, gunakan GROQ API
+    from app.core.groq_integration import query_groq_llama
+    response = await query_groq_llama(user_input)
+    return response
